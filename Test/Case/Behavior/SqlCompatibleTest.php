@@ -23,8 +23,6 @@ App::uses('Model', 'Model');
 App::uses('AppModel', 'Model');
 
 
-
-
 /**
  * SqlCompatiblePost class
  *
@@ -37,10 +35,10 @@ class SqlCompatiblePost extends AppModel {
 /**
  * useDbConfig property
  *
- * @var string 'mongo_test'
+ * @var string 'test_mongo'
  * @access public
  */
-	public $useDbConfig = 'mongo_test';
+	public $useDbConfig = 'test_mongo';
 
 /**
  * actsAs property
@@ -86,25 +84,29 @@ class SqlCompatibleTest extends CakeTestCase {
 		'persistent' => false,
 	);
 
+	public function setUp() {
+		$connections = ConnectionManager::enumConnectionObjects();
+
+		if (!empty($connections['test']['classname']) && $connections['test']['classname'] === 'mongodbSource') {
+			$config = new DATABASE_CONFIG();
+			$this->_config = $config->test;
+		}
+
+		if(!isset($connections['test_mongo'])) {
+			ConnectionManager::create('test_mongo', $this->_config);
+			$this->Mongo = new MongodbSource($this->_config);
+		}
+
+		$this->Post = ClassRegistry::init(array('class' => 'SqlCompatiblePost', 'alias' => 'Post', 'ds' => 'test_mongo'), true);
+	}
+
 /**
  * Sets up the environment for each test method
  *
  * @return void
  * @access public
  */
-	public function startTest() {
-		$connections = ConnectionManager::enumConnectionObjects();
-
-		if (!empty($connections['test']['classname']) && $connections['test']['classname'] === 'mongodbSource') {		
-			$config = new DATABASE_CONFIG();
-			$this->_config = $config->test;
-		}
-
-		ConnectionManager::create('mongo_test', $this->_config);
-		$this->Mongo = new MongodbSource($this->_config);
-
-		$this->Post = ClassRegistry::init(array('class' => 'SqlCompatiblePost', 'alias' => 'Post', 'ds' => 'mongo_test'));
-
+	public function startTest($method) {
 		$this->_setupData();
 	}
 
@@ -114,9 +116,13 @@ class SqlCompatibleTest extends CakeTestCase {
  * @return void
  * @access public
  */
-	public function endTest() {
+	public function endTest($method) {
 		$this->Post->deleteAll(true);
+	}
+
+	public function tearDown() {
 		unset($this->Post);
+		ClassRegistry::flush();
 	}
 
 /**
@@ -148,6 +154,30 @@ class SqlCompatibleTest extends CakeTestCase {
 				'NOT' => array(
 					'title' => 10
 				),
+			),
+			'fields' => array('_id', 'title', 'number'),
+			'order' => array('number' => 'ASC')
+		));
+		$result = Hash::extract($result, '{n}.Post.title');
+		$this->assertEqual($expected, $result);
+
+		$conditions = array(
+			'title' => array('$nin' => array(10))
+		);
+		$this->assertEqual($conditions, $this->Post->lastQuery['conditions']);
+	}
+
+/**
+ * testNOTIN method
+ *
+ * @return void
+ * @access public
+ */
+	public function testNOTIN() {
+		$expected = array(1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20);
+		$result = $this->Post->find('all', array(
+			'conditions' => array(
+				'title NOT IN' => array(10),
 			),
 			'fields' => array('_id', 'title', 'number'),
 			'order' => array('number' => 'ASC')
@@ -355,7 +385,36 @@ class SqlCompatibleTest extends CakeTestCase {
 		$this->assertEqual($expected, $result);
 	}
 
+/**
+ * Convert MongoDate objects to strings
+ *
+ * @return void
+ * @access public
+ */
+	public function testConvertDates() {
+		$expected = '2011-Nov-22 00:00:00';
+		$data = array('title' => 'date', 'created_at' => new MongoDate(strtotime('2011-11-22 00:00:00')));
+		$this->Post->save($data);
+		$result = $this->Post->read();
+		$this->assertEqual($expected, $result['Post']['created_at']);
+	}
 
+/**
+ * Convert MongoDate objects to another format strings
+ *
+ * @return void
+ * @access public
+ */
+	public function testConvertDatesAnotherFormat() {
+		$this->Post->Behaviors->detach('SqlCompatible');
+		$this->Post->Behaviors->attach('Mongodb.SqlCompatible', array('dateFormat' => 'Y-m-d H:i:s'));
+
+		$expected = '2011-11-22 00:00:00';
+		$data = array('title' => 'date', 'created_at' => new MongoDate(strtotime('2011-11-22 00:00:00')));
+		$this->Post->save($data);
+		$result = $this->Post->read();
+		$this->assertEqual($expected, $result['Post']['created_at']);
+	}
 
 /**
  * setupData method
@@ -364,7 +423,9 @@ class SqlCompatibleTest extends CakeTestCase {
  * @access protected
  */
 	protected function _setupData() {
-		$this->Post->deleteAll(true);
+		$this->Post->deleteAll(true, false);
+		$this->Post->primaryKey = '_id';
+
 		for ($i = 1; $i <= 20; $i++) {
 			$data = array(
 				'title' => $i,
