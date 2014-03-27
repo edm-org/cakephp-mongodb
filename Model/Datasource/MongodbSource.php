@@ -210,7 +210,7 @@ class MongodbSource extends DboSource {
 						? $class::RP_SECONDARY_PREFERRED : $class::RP_PRIMARY);
 				}
 			}
-
+			
 			if ($this->_db = $this->connection->selectDB($this->config['database'])) {
 				if (!empty($this->config['login']) && $this->_driverVersion < '1.2.0') {
 					$return = $this->_db->authenticate($this->config['login'], $this->config['password']);
